@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>chatApp</title>
+  <style>
+    #output li {
+      background: #ccc;
+      list-style: none;
+    }
+
+    #preview img {
+      width: 200px;
+      margin: 10px;
+      border: solid 1px silver;
+    }
+
+    .menu {
+      list-style: none;
+      display: flex;
+    }
+
+    .menu img {
+      width: 30px;
+      border-radius: 50%;
+    }
+
+    .menu li {
+      padding: 0 10px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Realtime Chat</h1>
+
+  <ul class="menu">
+    <li><a href="#" class="btn-icon" id="logout">ログアウト</a></li>
+    <li><span id="uname"></span></li>
+    <li><img src="" id="prof"></li>
+  </ul>
+
+  <!-- 入力場所を作成しよう -->
+  <form>
+    <fieldset>
+      <legend>チャット入力画面</legend>
+      <div>
+        name: <input type="text" id="name">
+      </div>
+      <div>
+        text: <input type="text" id="text">
+      </div>
+
+      <!-- multipleだと複数ファイルを指定できる -->
+      <!-- <input type="file" id="url" multiple> -->
+      <input type="file" id="url">
+
+      <!-- 👇ここにプレビュー画像を表示する -->
+      <div id="preview"></div>
+      <div>
+        <button type="button" id="send">Send</button>
+      </div>
+
+      <!-- データ出力場所 -->
+      <ul id="output"></ul>
+    </fieldset>
+  </form>
+
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+
+
+  <script type="module">
+    // Import the functions you need from the SDKs you need
+    import {
+      initializeApp
+    } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-app.js";
+
+    import {
+      getFirestore, collection, addDoc, serverTimestamp, orderBy, query, onSnapshot
+    } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore.js";
+
+    import {
+      getStorage, ref, uploadString, getDownloadURL, uploadBytes
+    } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-storage.js";
+
+    import {
+      getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, setPersistence, browserSessionPersistence
+    } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-auth.js";
+
+    import {
+      getDatabase, push, set, onValue, onChildAdded, remove, onChildRemoved
+    } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-database.js";
+
+
+    // Your web app's Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyDkqtwBfy4248deggXeq1zepo9ZzClmfI4",
+      authDomain: "chat-app-test-448c4.firebaseapp.com",
+      databaseURL: "https://chat-app-test-448c4-default-rtdb.firebaseio.com",
+      projectId: "chat-app-test-448c4",
+      storageBucket: "chat-app-test-448c4.appspot.com",
+      messagingSenderId: "813124462397",
+      appId: "1:813124462397:web:e29315f55bee975803c754"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const storage = getStorage(app);
+
+
+    const db = getFirestore(app);
+    // ↑これをを書いておくことでdbに対してデータの追加や取得ができるようになる。
+
+
+
+    // GoogleAuth
+    const provider = new GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/contacts.readonly');
+    const auth = getAuth();
+
+    /*-----------
+    ログイン時の処理
+    ----------- */
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        const uid = user.uid;
+        //ユーザー情報取得できます
+        if (user !== null) {
+          user.providerData.forEach((profile) => {
+            //Login情報取得
+            $("#uname").text(profile.displayName);
+            $("#prof").attr("src", profile.photoURL);
+          });
+        };
+
+
+        // 送信時
+        $('#send').on('click', async function () {
+          const post = {
+            name: $('#name').val(),
+            text: $('#text').val(),
+            time: serverTimestamp(),
+            url: $('#url').val(),
+          };
+          console.log(post);
+          addDoc(collection(db, 'chat'), post);
+          $('#text').val('');
+
+          // 画像が選択されている場合は、アップロードする
+          const files = fileInput.files;
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            await uploadImage(file);
+          };
+        });
+
+
+        // データ取得条件の指定（今回は時間の新しい順に並び替えて取得）
+        // プログラムの分野では英語の「descending order」を略した「desc」と呼ばれます。上から新しい順！
+        // プログラムの分野では英語の「ascending order」を略した「asc」と呼ばれます。下から新しい順！
+        const q = query(collection(db, "chat"), orderBy("time", "desc"));
+
+        // オンラインのデータに変更があったタイミングで{}内の処理が実行される
+        onSnapshot(q, (querySnapshot) => {
+          // データ確認
+          console.log(querySnapshot.docs);
+          // 使いやすいデータに変換する
+          // 空の配列を作り、querySnapshot.docsに対して繰り返し処理で各要素に対して、docIDと中身を取得し、配列に入れる。
+          const documents = [];
+          querySnapshot.docs.forEach(function (doc) {
+            const document = {
+              id: doc.id,
+              data: doc.data(),
+            };
+            documents.push(document);
+            console.log(documents); // ここまでは毎回同じ！
+
+            // タグを入れる配列
+            const htmlElements = [];
+            documents.forEach(function (document) {
+              htmlElements.push(`
+          <li id="${document.id}">
+          <p>${document.data.name
+                } at ${convertTimestampToDatetime(document.data.time.seconds)}</p>
+          <p>${document.data.text}</p>
+          <p>${document.data.url}</p>
+          </li>
+        `);
+            });
+            $("#output").html(htmlElements);
+
+          });
+        });
+
+        // <input>でファイルが選択されたときの処理
+        const fileInput = document.getElementById('url');
+        const handleFileSelect = () => {
+          const files = fileInput.files;
+          for (let i = 0; i < files.length; i++) {
+            previewFile(files[i]);
+            // ーーーーーーーーーーーーーーーーーーーーーーーーー
+            // previewFile(file); // プレビューの表示
+            // uploadImage(file); // 画像のアップロード処理
+            // ーーーーーーーーーーーーーーーーーーーーーーーーー
+          }
+        }
+        fileInput.addEventListener('change', handleFileSelect);
+
+
+        // 画像のアップロード処理
+        const uploadImage = async (file) => {
+          try {
+            // Storageに画像をアップロード
+            const storageRef = ref(storage, 'chat/' + file.name);
+            await uploadString(storageRef, file);
+
+            // アップロードした画像のURLを取得
+            const imageURL = await getDownloadURL(storageRef);
+
+            // Firestoreに画像のURLを保存
+            await addDoc(collection(db, 'chat'), { url: imageURL });
+
+            console.log('Image uploaded successfully!');
+          } catch (error) {
+            console.error('Error uploading image:', error);
+          }
+        };
+
+
+        function previewFile(file) {
+          // プレビュー画像を追加する要素
+          const preview = document.getElementById('preview');
+
+          // FileReaderオブジェクトを作成
+          const reader = new FileReader();
+
+          // ファイルが読み込まれたときに実行する
+          reader.onload = function (e) {
+            const imageUrl = e.target.result; // 画像のURLはevent.target.resultで呼び出せる
+            const img = document.createElement("img"); // img要素を作成
+            img.src = imageUrl; // 画像のURLをimg要素にセット
+            preview.appendChild(img); // #previewの中に追加
+          };
+
+          // いざファイルを読み込む
+          reader.readAsDataURL(file);
+        };
+
+
+        // metaKey + Enter で送信
+        $("#text").on("keydown", function (e) {
+          if (e.metaKey && e.key === 'Enter') {
+            const postData = {
+              name: $("#name").val(),
+              text: $("#text").val(),
+              time: serverTimestamp(),
+              url: $("#url").val(),
+            };
+            addDoc(collection(db, "chat"), postData);
+            $("#text").val("");
+          }
+        });
+
+        // 日時をいい感じの形式にする関数
+        function convertTimestampToDatetime(timestamp) {
+          const _d = timestamp ? new Date(timestamp * 1000) : new Date();
+          const Y = _d.getFullYear();
+          const m = (_d.getMonth() + 1).toString().padStart(2, '0');
+          const d = _d.getDate().toString().padStart(2, '0');
+          const H = _d.getHours().toString().padStart(2, '0');
+          const i = _d.getMinutes().toString().padStart(2, '0');
+          const s = _d.getSeconds().toString().padStart(2, '0');
+          return `${Y}/${m}/${d} ${H}:${i}:${s}`;
+        };
+
+      } else {
+        _redirect();  // User is signed out
+      }
+    });
+
+    // ログアウト処理
+    $("#logout").on("click", function () {
+      // signInWithRedirect(auth, provider);
+      signOut(auth).then(() => {
+        // Sign-out successful.
+        _redirect();
+      }).catch((error) => {
+        // An error happened.
+        console.error(error);
+      });
+    });
+
+    // ログイン画面へリダイレクト(関数作成)
+    function _redirect() {
+      location.href = "login.html";
+    };
+
+
+  </script>
+
+</body>
+
+</html>
